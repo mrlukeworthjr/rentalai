@@ -131,9 +131,11 @@ async function appView(id) {
     <div class="section cols"><div><h2 style="margin-bottom:10px">Upload documents</h2><div id="up"></div></div>
       <div><h2 style="margin-bottom:10px">Applicant's upload link</h2><div class="sheet pad"><p class="sub small">The applicant uploads here without an account. They see what to send next, not the forensic findings.</p>
       <div class="copy" style="margin-top:12px"><input type="text" readonly value="${esc(link)}" aria-label="Applicant link"><button class="btn ghost sm" id="cp">Copy link</button></div>
+      <label class="consent" style="margin-top:18px"><input type="checkbox" id="tc" ${a.training_consent ? 'checked' : ''}><span>Applicant has consented to their documents being used to improve fraud detection${a.consent_by ? ` <span class="sub">(last set by ${esc(a.consent_by === 'applicant' ? 'the applicant' : a.consent_by.replace('staff:', ''))})</span>` : ''}. Without this, these documents are never used for training.</span></label>
       ${a.applicant_requests.length ? `<h3 style="margin-top:18px">What the applicant is being asked for</h3><ul class="plain">${a.applicant_requests.map(r => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}</div></div></div>`, 'apps');
   root.querySelectorAll('tr.link').forEach(tr => tr.onclick = () => location.hash = '#/doc/' + tr.dataset.id);
   uploader(document.getElementById('up'), `/applications/${id}/documents`, () => appView(id));
+  document.getElementById('tc').onchange = async e => { try { await api(`/applications/${id}/consent`, { method: 'POST', json: { training: e.target.checked } }); appView(id); } catch (x) { fail(x); } };
   document.getElementById('cp').onclick = e => { navigator.clipboard?.writeText(link); e.target.textContent = 'Link copied'; };
   document.getElementById('del').onclick = async () => { if (confirm('Delete this application and its documents?')) { await api('/applications/' + id, { method: 'DELETE' }); location.hash = '#/'; } };
   if (a.pending) timer = setTimeout(() => appView(id), 1500);
@@ -158,7 +160,7 @@ async function docView(id) {
   ${fs.length ? `<div class="section"><h2>Findings</h2><p class="sub small" style="margin-bottom:10px">Select a finding to see where it is on the page.</p>${fs.map(findingCard).join('')}</div>` : ''}
   ${(r.passed || []).length ? `<div class="section"><h2>Checks passed</h2><div class="sheet pad"><ul class="checks" style="margin-top:0">${r.passed.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div></div>` : ''}
   ${fields.length ? `<div class="section"><h2>What was read from the document</h2><div class="sheet pad"><div class="kv">${fields.map(x => `<span>${x[0]}</span><span class="mono">${esc(x[1])}</span>`).join('')}</div></div></div>` : ''}
-  <div class="section"><h2>Analyst decision</h2><div class="sheet pad"><p class="sub small">Record what you concluded after your own review. Your decision overrides the automated result and becomes a training example for the detection model.</p>
+  <div class="section"><h2>Analyst decision</h2><div class="sheet pad"><p class="sub small">Record what you concluded after your own review. Your decision overrides the automated result. It is used to train the detection model only if the applicant has consented.</p>
     <label for="notes">Notes</label><textarea id="notes" rows="2">${esc(d.review?.notes || '')}</textarea>
     <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn ghost" data-dec="genuine">Confirm genuine</button><button class="btn ghost" data-dec="fraudulent">Confirm fraudulent</button>
     ${d.review ? '<button class="btn ghost" data-dec="clear">Clear decision</button>' : ''}<button class="btn ghost" id="re">Run checks again</button><button class="btn ghost" id="dl">Download original</button></div></div></div></div></div>`, 'apps');
@@ -189,9 +191,9 @@ async function modelView() {
   const rows = Object.entries(x.by_kind || {}).sort();
   const NAME = { clean: 'Original export', browser: 'Printed to PDF from a browser', resaved: 'Re-saved by a PDF viewer', office: 'Made in Excel by a small employer', scan_jpg: 'Photo or scan (JPEG)', scan_pdf: 'Scan inside a PDF', screenshot: 'Screenshot', retype: 'Figures retyped in a PDF editor', whiteout: 'Figures covered and typed over', rebuilt: 'Rebuilt in Word or Canva, taxes left unchanged', rebuilt_clean: 'Rebuilt with provider-style metadata, taxes left unchanged', image_edit: 'Figures painted over in an image', name_swap: "Someone else's stub", generator: 'Self-consistent fake from a generator or template', perfect: 'Self-consistent fake with provider-style metadata' };
   shell(`<div class="head"><div><h1>Detection model</h1><p class="sub" style="max-width:70ch;margin-top:8px">Each document is tested by fixed checks (arithmetic, tax rates, file structure). A gradient-boosted model then weighs that evidence into one probability. It ships trained on synthetic documents and gets better as you confirm real outcomes.</p></div>
-    <button class="btn" id="rt" ${m.available ? '' : 'disabled'}>Retrain with analyst decisions</button></div>
+    <button class="btn" id="rt" ${m.available ? '' : 'disabled'}>Retrain with consented documents</button></div>
     <div class="sheet cols3"><div class="stat"><span class="sub small">Trained on</span><b>${m.trained_on ? m.trained_on.synthetic + m.trained_on.real_labelled : '—'}</b><span class="sub small">${m.trained_on ? `${m.trained_on.synthetic} synthetic, ${m.trained_on.real_labelled} analyst-confirmed` : 'No model installed'}</span></div>
-    <div class="stat"><span class="sub small">Analyst decisions recorded</span><b>${m.labelled_documents}</b><span class="sub small">Available for the next retrain</span></div>
+    <div class="stat"><span class="sub small">Usable for training</span><b>${m.consented_documents}</b><span class="sub small">of ${m.labelled_documents} analyst decisions; the rest lack applicant consent</span></div>
     <div class="stat"><span class="sub small">Model version</span><b style="font-size:22px;padding-top:8px">${esc(m.version || '—')}</b></div></div>
     <div class="section"><h2>Results on the synthetic test set</h2><p class="sub small" style="margin-bottom:10px;max-width:80ch">These numbers describe documents generated by this project's own simulator. They are not a measurement of accuracy on real applicants' documents; that requires real, labelled files.</p>
     <div class="sheet cols3"><div class="stat"><span class="sub small">Genuine documents passed</span><b>${pct(x.genuine_passed)}</b><span class="sub small">${pct(x.genuine_failed)} wrongly failed</span></div>
@@ -211,10 +213,12 @@ async function applyView(tok) {
     <h1 style="margin-top:28px">Send your income documents</h1>
     <p class="sub" style="margin-top:10px">${esc(s.company)} asked for proof of income for ${esc(s.applicant_name)}${s.property ? ', applying for ' + esc(s.property) : ''}. Upload your two most recent pay stubs and, if you have it, your latest bank statement.</p>
     <div id="up" style="margin-top:24px"></div>
+    <label class="consent"><input type="checkbox" id="tc" ${s.training_consent ? 'checked' : ''}><span><b>Optional:</b> allow RentalAi to use my documents to improve its fraud detection. This does not affect my application, and I can untick it at any time.</span></label>
     ${s.requests.length && !checking ? `<div class="sheet pad section"><h2>Still needed</h2><ul class="plain">${s.requests.map(r => `<li>${esc(r)}</li>`).join('')}</ul></div>` : ''}
     ${s.documents.length ? `<div class="section"><h2>What you have sent</h2><div class="sheet"><table><tbody>${s.documents.map(d => `<tr><td>${esc(d.filename)}</td><td class="num">${esc(d.state)}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
-    <p class="sub small section">Your files are used only to verify income for this application.</p></div>`;
+    <p class="sub small section">Your files are used to verify income for this application. They are used to improve fraud detection only if you tick the box above.</p></div>`;
   uploader(document.getElementById('up'), `/public/${tok}/documents`, () => applyView(tok));
+  document.getElementById('tc').onchange = e => api(`/public/${tok}/consent`, { method: 'POST', json: { training: e.target.checked } }).catch(() => { e.target.checked = !e.target.checked; });
   if (checking) timer = setTimeout(() => applyView(tok), 1500);
 }
 

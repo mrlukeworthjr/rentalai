@@ -2,8 +2,8 @@ import os
 import secrets
 from datetime import datetime
 
-from sqlalchemy import (JSON, Column, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text,
-                        create_engine)
+from sqlalchemy import (JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text,
+                        create_engine, inspect, text)
 from sqlalchemy.orm import declarative_base, deferred, relationship, sessionmaker
 
 URL = os.environ.get("DATABASE_URL", "sqlite:///./rentalai.db")
@@ -44,6 +44,10 @@ class Application(Base):
     property = Column(String(200))
     monthly_rent = Column(Float)
     verdict = Column(String(20))
+    # Documents may be used to improve the detection model only when this is true.
+    training_consent = Column(Boolean, default=False, nullable=False, server_default=text("false"))
+    consent_at = Column(DateTime)
+    consent_by = Column(String(40))                    # applicant | staff:<email>
     summary = Column(JSON, default=dict)
     created_at = Column(DateTime, default=now)
     documents = relationship("Document", back_populates="application", order_by="Document.id",
@@ -88,3 +92,13 @@ class Setting(Base):
 
 def init():
     Base.metadata.create_all(engine)
+    # Tiny forward-only migration for databases created before a column existed.
+    have = {c["name"] for c in inspect(engine).get_columns("applications")}
+    add = {"training_consent": "BOOLEAN NOT NULL DEFAULT FALSE", "consent_at": "TIMESTAMP", "consent_by": "VARCHAR(40)"}
+    for col, ddl in add.items():
+        if col not in have:
+            try:
+                with engine.begin() as con:
+                    con.execute(text(f"ALTER TABLE applications ADD COLUMN {col} {ddl}"))
+            except Exception:       # another replica added it first
+                pass

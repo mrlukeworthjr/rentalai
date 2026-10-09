@@ -273,10 +273,31 @@ def get_app(app_id: int, u: User = Depends(current)):
         sm = a.summary or {}
         return {"id": a.id, "applicant_name": a.applicant_name, "applicant_email": a.applicant_email,
                 "property": a.property, "monthly_rent": a.monthly_rent, "verdict": a.verdict, "token": a.token,
+                "training_consent": bool(a.training_consent), "consent_by": a.consent_by,
+                "consent_at": a.consent_at.isoformat() if a.consent_at else None,
                 "pending": any(d.status in ("queued", "processing") for d in a.documents),
                 "documents": [doc_row(d) for d in a.documents], "cross": sm.get("cross", []),
                 "income": sm.get("income"), "needs_to_pass": sm.get("needs_to_pass", []),
                 "applicant_requests": sm.get("applicant_requests", []), "created_at": a.created_at.isoformat()}
+
+
+class ConsentIn(BaseModel):
+    training: bool
+
+
+def set_consent(s, a, value: bool, who: str):
+    a.training_consent, a.consent_at, a.consent_by = value, datetime.utcnow(), who[:40]
+    s.add(Audit(org_id=a.org_id, action="consent.grant" if value else "consent.withdraw", target=str(a.id), detail=who))
+
+
+@app.post("/api/applications/{app_id}/consent")
+def staff_consent(app_id: int, b: ConsentIn, u: User = Depends(current)):
+    """Staff record consent the applicant gave outside the upload page (for example on a signed form)."""
+    with Session() as s:
+        a = own_app(s, u, app_id)
+        set_consent(s, a, b.training, "staff:" + u.email)
+        s.commit()
+        return {"training_consent": a.training_consent}
 
 
 @app.delete("/api/applications/{app_id}")
@@ -364,14 +385,20 @@ def review(doc_id: int, b: ReviewIn, u: User = Depends(current)):
 
 # ---------- model ----------------------------------------------------------
 
+def trainable(d) -> bool:
+    """The single gate for training use: an analyst label, stored features, and the applicant's consent."""
+    return bool(d.review and d.report and d.report.get("features") and d.application.training_consent)
+
+
 @app.get("/api/model")
 def model_info(u: User = Depends(current)):
     m = model.load() or {}
     with Session() as s:
-        labelled = s.query(Document).filter(Document.review.isnot(None)).all()
-        n = len([d for d in labelled if d.review])
+        labelled = [d for d in s.query(Document).filter(Document.review.isnot(None)).all() if d.review]
+        usable = len([d for d in labelled if trainable(d)])
     return {"available": bool(m), "version": m.get("version"), "trained_on": m.get("trained_on"),
-            "metrics": m.get("metrics"), "labelled_documents": n, "features": model.FEATURES}
+            "metrics": m.get("metrics"), "labelled_documents": len(labelled), "consented_documents": usable,
+            "features": model.FEATURES}
 
 
 @app.post("/api/model/retrain")
@@ -381,8 +408,7 @@ def retrain(u: User = Depends(current)):
     if not base:
         raise HTTPException(400, "No base model is installed")
     with Session() as s:
-        rows = [d for d in s.query(Document).filter(Document.review.isnot(None)).all()
-                if d.review and d.report and d.report.get("features")]
+        rows = [d for d in s.query(Document).filter(Document.review.isnot(None)).all() if trainable(d)]
         X = [d.report["features"] for d in rows]
         y = [1 if d.review["decision"] == "fraudulent" else 0 for d in rows]
         new = do(base, X, y)
@@ -459,8 +485,19 @@ def public_status(token: str):
         state = lambda d: ("Checking" if d.status in ("queued", "processing") else
                            "Received" if effective(d) == "pass" else "More information needed")
         return {"applicant_name": a.applicant_name, "company": org.name, "property": a.property,
+                "training_consent": bool(a.training_consent),
                 "documents": [{"filename": d.filename, "state": state(d)} for d in a.documents],
                 "requests": (a.summary or {}).get("applicant_requests", [])}
+
+
+@app.post("/api/public/{token}/consent")
+def public_consent(token: str, b: ConsentIn):
+    """The applicant opts in to, or withdraws from, their documents being used to improve detection."""
+    with Session() as s:
+        a = by_token(s, token)
+        set_consent(s, a, b.training, "applicant")
+        s.commit()
+        return {"training_consent": a.training_consent}
 
 
 @app.post("/api/public/{token}/documents")

@@ -69,6 +69,9 @@ Those figures describe the simulator, **not real applicants' documents**. Nobody
 beats a commercial product until it has been measured on real, labelled files. The path there is built in:
 
 - Every analyst decision ("Confirm genuine" / "Confirm fraudulent") is stored with the document's features.
+- **Consent gate:** a document is used for training only if its applicant has consented — a tick box on the
+  applicant upload page, or recorded by staff on the application. Consent can be withdrawn; the next retrain
+  drops those documents. The check lives in one function, `trainable()` in `app/main.py`.
 - **Detection model → Retrain with analyst decisions** refits on synthetic + real labels, weighting each
   real one 8×, and stores the new model in the database. As real labels accumulate they dominate.
 - `python -m ml.train` rebuilds the base model; extend `ml/synth.py` with layouts from the providers you see.
