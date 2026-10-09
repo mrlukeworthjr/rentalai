@@ -106,7 +106,8 @@ def analyze(data: bytes, filename: str = "document", applicant: str | None = Non
     elif fields.doc_type == "bank_statement":
         fs += checks.bank_checks(fields, doc, applicant, today)
     else:
-        fs.append(finding("C_TYPE", "medium", "Not recognised as a pay stub or bank statement",
+        # "high" so an unrecognised document can never come back as Passed
+        fs.append(finding("C_TYPE", "high", "Not recognised as a pay stub or bank statement",
                           "The text does not contain the labels found on pay stubs or bank statements.",
                           "Only those two document types can be reconciled and used for income.",
                           "A pay stub or a bank statement.", "Upload a pay stub or a bank statement.",

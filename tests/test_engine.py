@@ -85,3 +85,17 @@ def test_cross_document_ytd():
     today = t2["pay_date"] + timedelta(days=3)
     reps = [analyze(synth.render_stub(t), f"{i}.pdf", t["name"], today) for i, t in enumerate((t1, t2))]
     assert "X_YTD" in {f["code"] for f in checks.cross_checks(reps)}
+
+
+def test_unrecognised_document_never_passes():
+    import io
+    from PIL import Image, ImageDraw
+    img = Image.new("RGB", (1200, 900), "white")
+    d = ImageDraw.Draw(img)
+    for i, line in enumerate(["BULLETIN DE PAIE", "Salaire de base 151,67 23,39 3 547,56", "Net a payer 2 868,34",
+                              "Assurance maladie 26,61", "Total des cotisations 679,22", "Paye par virement bancaire"] * 3):
+        d.text((60, 40 + i * 44), line, fill="black", font=synth._ttf(28))
+    b = io.BytesIO()
+    img.save(b, "PNG")
+    r = analyze(b.getvalue(), "fr.png")
+    assert r["doc_type"] == "unknown" and r["verdict"] != "pass"
