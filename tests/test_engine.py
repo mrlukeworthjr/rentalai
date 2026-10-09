@@ -99,3 +99,25 @@ def test_unrecognised_document_never_passes():
     img.save(b, "PNG")
     r = analyze(b.getvalue(), "fr.png")
     assert r["doc_type"] == "unknown" and r["verdict"] != "pass"
+
+
+def test_pixel_detector_marks_a_painted_figure_and_stays_out_of_the_verdict():
+    from app.engine import pixel
+    from ml import train_pixel as tp
+    if not pixel.load():
+        pytest.skip("pixel model not installed")
+    hits = 0
+    for seed in range(40, 52):
+        rng = random.Random(seed)
+        t = synth.stub_truth(rng)
+        base, pg = synth.rasterize(synth.render_stub(t), 150)
+        img, _ = tp.capture(base, rng, "scan")
+        r = pg.search_for(synth.fm(t["net"]))[0]
+        k = 150 / 72
+        box = tp.paint(img, (r.x0 * k, r.y0 * k, r.x1 * k, r.y1 * k), synth.fm(t["net"] * 2), rng, False)
+        res = pixel.detect(img)
+        hits += any(not (R["bbox"][2] < box[0] or R["bbox"][0] > box[2] or R["bbox"][3] < box[1] or R["bbox"][1] > box[3])
+                    for R in res["regions"])
+    assert hits >= 8
+    from app.engine import model
+    assert "F_PIXEL" not in model.CODES

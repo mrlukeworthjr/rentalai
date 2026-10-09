@@ -273,25 +273,34 @@ def file_checks(doc, fields):
             "and re-saved in a tool built for altering images.",
             "The original PDF from the provider, or an unedited photo straight from the phone or scanner.",
             ASK_ORIGINAL, producer=doc.exif_software))
+    from . import pixel
     for p in doc.pages:
-        for jp in p.jpeg_images[:1]:
-            hot = ela_hotspot(jp)
-            if hot:
-                box = hot["bbox"]
-                if doc.kind == "pdf":       # image pixels -> page points
-                    try:
-                        w, h = Image.open(io.BytesIO(jp)).size
-                        box = (box[0] * p.width / w, box[1] * p.height / h, box[2] * p.width / w, box[3] * p.height / h)
-                    except Exception:
-                        pass
-                out.append(finding(
-                    "F_ELA", "medium", "Part of the image was compressed differently from the rest",
-                    f"On page {p.number}, {hot['blocks']} small region(s) show a compression signature far from the "
-                    "rest of the picture.",
-                    "When something is pasted or retyped into a JPEG and saved again, the new area carries a "
-                    "different compression history. This is an indicator that warrants a look, not proof by itself.",
-                    "The original PDF from the provider, which removes the question entirely.", ASK_ORIGINAL,
-                    [_ref(p.number, box)], z=round(hot["z"], 1)))
+        src = doc.raw if doc.kind == "image" else (p.jpeg_images[0] if p.ocr and p.jpeg_images else None)
+        if src is None:
+            continue
+        try:
+            img = Image.open(io.BytesIO(src)).convert("RGB")
+        except Exception:
+            continue
+        res = pixel.detect(img)
+        if res is None:                     # no trained pixel model installed: fall back to plain error-level analysis
+            hot = ela_hotspot(src) if (doc.image_format == "jpeg" or doc.kind == "pdf") else None
+            res = {"flagged": bool(hot), "regions": [{"bbox": hot["bbox"], "score": 0.0}] if hot else []}
+        if not res["flagged"]:
+            continue
+        kx, ky = p.width / img.width, p.height / img.height      # image pixels -> page units
+        boxes = [(r["bbox"][0] * kx, r["bbox"][1] * ky, r["bbox"][2] * kx, r["bbox"][3] * ky) for r in res["regions"]]
+        out.append(finding(
+            "F_PIXEL", "low", "Areas worth a closer look in the image",
+            f"On page {p.number}, {len(boxes)} highlighted area(s) differ from the surrounding page in ink darkness, "
+            "edge sharpness, background grain or compression pattern.",
+            "Everything on a photographed or scanned page passes through the same lens, lighting and compression. "
+            "Text that was painted in, pasted or retyped afterwards keeps a different texture. This detector is "
+            "experimental: it points a reviewer at areas to inspect and often marks stamps, logos, handwriting and "
+            "unusual print on genuine documents. It does not affect the result.",
+            "The original PDF from the payroll or bank portal, which can be verified structurally and removes the "
+            "question.", ASK_ORIGINAL, [_ref(p.number, b) for b in boxes],
+            score=round(max((r["score"] for r in res["regions"]), default=0.0), 3)))
     return out
 
 

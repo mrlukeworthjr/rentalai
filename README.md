@@ -37,7 +37,7 @@ python -m pytest -q                        # pip install pytest
 | Layer | Checks |
 |---|---|
 | File structure (PDF) | Saved by an editor (Photoshop, Canva, iLovePDF, Sejda…); made in Word/Excel; modified after creation; multiple saved revisions; annotations or overlays; a value covered and retyped (the original text is still in the file); isolated white boxes under figures; figures in a different typeface or size; figures out of line with their column; typed text on top of a scan; stripped metadata |
-| Images and scans | Editing-software signature; error-level analysis for locally recompressed regions; flagged as "can be read but not fully verified" |
+| Images and scans | Editing-software signature; an experimental pixel-level detector that marks areas for a reviewer (see below); flagged as "can be read but not fully verified" |
 | Pay stub arithmetic | Gross − deductions = net; deduction lines sum to total; earnings lines sum to gross; rate × hours = amount |
 | Payroll tax law | Social Security = 6.2% and Medicare = 1.45% of taxable wages (allowing pre-tax benefits and the annual wage base). An inflated gross almost always leaves these lines at their true values, so the report states the wages they imply |
 | Calendar | Year-to-date below current; year-to-date impossible for the date; period length vs pay frequency; future or stale pay date; file created long before its pay date |
@@ -80,6 +80,25 @@ Known blind spot, shown plainly on the model page: a fake that is internally con
 provider-style metadata cannot be caught from the file alone. Closing that gap needs a second source —
 the bank-deposit cross-check here, and next a payroll/bank data connection (Argyle, Pinwheel, Plaid).
 
+## Pixel-level detector (experimental)
+
+`app/engine/pixel.py` scores small cells of a photo or scan on ink darkness, edge sharpness, background grain,
+colour cast and JPEG error levels, each compared with the rest of the same page. It is trained by
+`python -m ml.train_pixel` on 3,000 generated images pushed through simulated screenshots, scans and phone
+photos, half of them edited in a known region (paint-over, copy-move, splice).
+
+| Test | Genuine wrongly marked | Forged marked | Page AUC |
+|---|---|---|---|
+| Generated images, held out | 3.3% | 73% | — |
+| Find it again: 987 real scanned receipts, 162 forged by hand | 425 of 825 (52%) | 115 of 162 (71%) | 0.66 |
+| L3i payslip sample: 12 clean bitmaps, 6 forged in MS Paint | 0 of 6 | 1 of 6 | 0.65 |
+
+It does not transfer to real documents yet: on real receipts it marks half of the genuine ones. So its finding is
+a low-severity note that highlights areas for a reviewer, and it is excluded from the risk score and verdict.
+Copy-paste edits inside a clean digital image leave almost no pixel trace and are mostly missed.
+Re-run the public tests with `python -m ml.eval_public` (the datasets are not redistributed here; neither states
+a licence, so they are used for measurement only). Improving it needs real, labelled, consented scans.
+
 ## What applicants see
 
 The applicant link (`/apply/<token>`) accepts uploads without an account and shows only what to send next
@@ -111,7 +130,9 @@ app/engine/parse.py    document type and fields
 app/engine/forensics.py  file-level checks
 app/engine/checks.py   content and cross-document checks
 app/engine/model.py    features, model scoring, verdict
+app/engine/pixel.py    pixel-level detector for photos and scans (experimental)
 app/engine/income.py   income calculation
 ml/synth.py, ml/train.py   synthetic data and training
+ml/train_pixel.py, ml/eval_public.py   pixel detector training and public-set tests
 static/                web app
 ```

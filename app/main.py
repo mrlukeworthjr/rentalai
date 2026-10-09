@@ -20,7 +20,7 @@ from pydantic import BaseModel
 
 from . import db
 from .db import Application, Audit, Document, Org, Session, Setting, User
-from .engine import HEADLINE, analyze, checks, extract, income, model
+from .engine import HEADLINE, analyze, checks, extract, income, model, pixel
 
 log = logging.getLogger("rentalai")
 SECRET = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
@@ -398,6 +398,7 @@ def model_info(u: User = Depends(current)):
         usable = len([d for d in labelled if trainable(d)])
     return {"available": bool(m), "version": m.get("version"), "trained_on": m.get("trained_on"),
             "metrics": m.get("metrics"), "labelled_documents": len(labelled), "consented_documents": usable,
+            "pixel": (pixel.load() or {}).get("metrics"),
             "features": model.FEATURES}
 
 

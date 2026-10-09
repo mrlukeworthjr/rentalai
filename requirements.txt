@@ -9,6 +9,7 @@ pymupdf==1.28.2
 pillow==12.3.0
 pytesseract==0.3.13
 numpy==2.5.3
+scipy==1.18.1
 scikit-learn==1.9.1
 joblib==1.6.0
 reportlab==5.0.1
