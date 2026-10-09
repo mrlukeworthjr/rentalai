@@ -1,0 +1,14 @@
+fastapi==0.143.0
+uvicorn==0.53.0
+python-multipart==0.0.32
+pydantic==2.13.5
+SQLAlchemy==2.1.4
+psycopg2-binary==2.9.13
+PyJWT==2.14.0
+pymupdf==1.28.2
+pillow==12.3.0
+pytesseract==0.3.13
+numpy==2.5.3
+scikit-learn==1.9.1
+joblib==1.6.0
+reportlab==5.0.1

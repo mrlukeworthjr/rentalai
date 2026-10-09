@@ -1,0 +1,8 @@
+__pycache__
+*.pyc
+rentalai.db
+.env
+.git
+tests
+samples
+.pytest_cache
